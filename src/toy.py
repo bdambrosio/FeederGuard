@@ -9,8 +9,43 @@ import base64
 import requests
 import time
 import sys
+import os
+from openai import OpenAI
+import pygame
+from dotenv import load_dotenv
 
-SGLANG_URL = "http://localhost:6000/v1/chat/completions"
+# Load environment variables and initialize audio
+load_dotenv()
+
+# Set audio output to headphones (card 2) before initializing pygame
+os.environ['SDL_AUDIODRIVER'] = 'alsa'
+os.environ['AUDIODEV'] = 'hw:3,0'  # card 3, device 0 = WM8960
+
+# Debug audio devices
+print("[Audio] Initializing pygame mixer...")
+pygame.mixer.init()
+print(f"[Audio] Mixer initialized: {pygame.mixer.get_init()}")
+
+# List available audio devices using SDL
+import subprocess
+try:
+    result = subprocess.run(['aplay', '-l'], capture_output=True, text=True)
+    print("[Audio] Available ALSA playback devices:")
+    print(result.stdout)
+except Exception as e:
+    print(f"[Audio] Could not list ALSA devices: {e}")
+
+# Show current default device
+try:
+    result = subprocess.run(['pactl', 'get-default-sink'], capture_output=True, text=True)
+    print(f"[Audio] PulseAudio default sink: {result.stdout.strip()}")
+except Exception as e:
+    print(f"[Audio] Could not get PulseAudio default: {e}")
+
+# OpenAI client for text-to-speech
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+SGLANG_URL = "http://192.168.68.76:6000/v1/chat/completions"
 MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 INTERVAL = 2  # seconds between checks
 
@@ -76,6 +111,30 @@ def describe_scene(b64_image):
     return ask_model(b64_image, prompt=DESCRIBE_PROMPT, max_tokens=200)
 
 
+def speak(text):
+    """Convert text to speech and play it."""
+    try:
+        print(f"[TTS] Starting speech synthesis for {len(text)} chars...")
+        with openai_client.audio.speech.with_streaming_response.create(
+            model="tts-1",
+            voice="alloy",
+            input=text
+        ) as response:
+            print("[TTS] Got response, streaming to file...")
+            response.stream_to_file('response.mp3')
+        print("[TTS] File written, loading into pygame...")
+        pygame.mixer.music.load('response.mp3')
+        print("[TTS] Playing audio...")
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.1)
+        print("[TTS] Playback complete.")
+    except Exception as e:
+        print(f"[TTS] Speech failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     cam = None
     
@@ -137,12 +196,18 @@ def main():
                 try:
                     description = describe_scene(b64)
                     print(f"  Scene: {description}\n")
+                    speak(description)
                 except requests.RequestException:
                     pass  # Don't fail if description fails
 
-                if "YES" in answer.upper().split("SQUIRREL")[-1][:10]:
+                answer_upper = answer.upper()
+                if "YES" in answer_upper.split("SQUIRREL")[-1][:10]:
                     print("  >>> SQUIRREL DETECTED! <<<\n")
+                    speak("Alert! Squirrel detected at the bird feeder!")
                     # trigger deterrent here
+                elif "PIGEON" in answer_upper and "YES" in answer_upper.split("PIGEON")[-1][:10]:
+                    print("  >>> PIGEON DETECTED! <<<\n")
+                    speak("Alert! Pigeon detected at the bird feeder!")
 
             except requests.RequestException as e:
                 print(f"Model request failed: {e}")
