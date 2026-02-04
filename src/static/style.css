@@ -84,6 +84,8 @@ html, body {
     object-fit: cover;
 }
 
+/* Note: Not mirroring video - using back camera for object recognition */
+
 .frozen-frame {
     position: absolute;
     top: 0;

@@ -20,7 +20,8 @@
 
         <!-- Camera Preview -->
         <div class="camera-container">
-            <img id="camera-feed" src="/video_feed" alt="Camera feed">
+            <video id="camera-feed" autoplay playsinline muted></video>
+            <canvas id="capture-canvas" style="display: none;"></canvas>
             <div id="camera-overlay" class="camera-overlay hidden">
                 <div class="thinking-animation">
                     <div class="eye left"></div>

@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import io
 
-from config import HOST, PORT, DEBUG, get_runtime_config, update_runtime_config
+from config import HOST, PORT, DEBUG, APP_DIR, get_runtime_config, update_runtime_config
 from camera import camera
 from audio import tts
 from library import library
@@ -51,15 +51,26 @@ def snapshot():
 @app.route("/describe", methods=["POST"])
 def describe():
     """One-shot scene description with TTS."""
-    frame_b64 = camera.get_frame_base64()
+    import base64
+    data = request.get_json()
+
+    # Get frame from request (browser camera) or fall back to Pi camera
+    if data and "frame" in data:
+        frame_b64 = data["frame"]
+    else:
+        frame_b64 = camera.get_frame_base64()
+
     if frame_b64 is None:
         return jsonify({"error": "No camera frame available"}), 503
 
     try:
         description = describe_scene(frame_b64)
-        # Speak the description asynchronously
-        tts.speak(description)
-        return jsonify({"description": description})
+        # Generate audio for browser playback
+        audio_data = tts.synthesize(description)
+        audio_b64 = None
+        if audio_data:
+            audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+        return jsonify({"description": description, "audio": audio_b64})
     except VLMError as e:
         return jsonify({"error": str(e)}), 503
 
@@ -67,6 +78,7 @@ def describe():
 @app.route("/enroll", methods=["POST"])
 def enroll():
     """Enroll a photo with a name label."""
+    import base64
     data = request.get_json()
     if not data or "name" not in data:
         return jsonify({"error": "Name is required"}), 400
@@ -75,15 +87,24 @@ def enroll():
     if not name:
         return jsonify({"error": "Name cannot be empty"}), 400
 
-    # Get current frame
-    frame = camera.get_frame()
+    # Get frame from request (browser camera) or fall back to Pi camera
+    if data and "frame" in data:
+        # Decode base64 frame to numpy array
+        frame_bytes = base64.b64decode(data["frame"])
+        frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+    else:
+        frame = camera.get_frame()
+
     if frame is None:
         return jsonify({"error": "No camera frame available"}), 503
 
     result = library.enroll(name, frame)
 
-    # Speak confirmation
-    tts.speak(result["message"])
+    # Generate audio for browser playback
+    audio_data = tts.synthesize(result["message"])
+    if audio_data:
+        result["audio"] = base64.b64encode(audio_data).decode("utf-8")
 
     return jsonify(result)
 
@@ -119,9 +140,12 @@ def get_photo(name, photo_id):
 @app.route("/library/<name>", methods=["DELETE"])
 def delete_subject(name):
     """Delete a subject entirely."""
+    import base64
     result = library.delete_subject(name)
     if result["success"]:
-        tts.speak(result["message"])
+        audio_data = tts.synthesize(result["message"])
+        if audio_data:
+            result["audio"] = base64.b64encode(audio_data).decode("utf-8")
     return jsonify(result)
 
 
@@ -142,7 +166,10 @@ def clear_library():
 @app.route("/identify", methods=["POST"])
 def identify():
     """Identify subjects in current frame using contact sheet."""
+    import base64 as b64
     global current_conversation
+
+    data = request.get_json()
 
     # Check if we have any enrolled subjects
     if not library.has_subjects():
@@ -157,7 +184,12 @@ def identify():
     if contact_sheet_b64 is None:
         return jsonify({"error": "Could not generate contact sheet"}), 500
 
-    frame_b64 = camera.get_frame_base64()
+    # Get frame from request (browser camera) or fall back to Pi camera
+    if data and "frame" in data:
+        frame_b64 = data["frame"]
+    else:
+        frame_b64 = camera.get_frame_base64()
+
     if frame_b64 is None:
         return jsonify({"error": "No camera frame available"}), 503
 
@@ -171,12 +203,16 @@ def identify():
             "history": build_initial_conversation(contact_sheet_b64, frame_b64, response)
         }
 
-        # Speak the response
-        tts.speak(response)
+        # Generate audio for browser playback
+        audio_data = tts.synthesize(response)
+        audio_b64 = None
+        if audio_data:
+            audio_b64 = b64.b64encode(audio_data).decode("utf-8")
 
         return jsonify({
             "response": response,
-            "has_conversation": True
+            "has_conversation": True,
+            "audio": audio_b64
         })
 
     except VLMError as e:
@@ -186,6 +222,7 @@ def identify():
 @app.route("/chat", methods=["POST"])
 def chat():
     """Follow-up question about current scene."""
+    import base64
     global current_conversation
 
     data = request.get_json()
@@ -213,10 +250,13 @@ def chat():
         # Update conversation history
         current_conversation["history"] = updated_history
 
-        # Speak the response
-        tts.speak(response)
+        # Generate audio for browser playback
+        audio_data = tts.synthesize(response)
+        audio_b64 = None
+        if audio_data:
+            audio_b64 = base64.b64encode(audio_data).decode("utf-8")
 
-        return jsonify({"response": response})
+        return jsonify({"response": response, "audio": audio_b64})
 
     except VLMError as e:
         return jsonify({"error": str(e)}), 503
@@ -299,6 +339,16 @@ if __name__ == "__main__":
     print("[App] Starting TTS engine...")
     tts.start()
 
-    # Run Flask app
-    print(f"[App] *** Server starting on http://{HOST}:{PORT} ***")
-    app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True, use_reloader=False)
+    # Run Flask app with HTTPS (required for browser camera access)
+    cert_file = APP_DIR.parent / "cert.pem"
+    key_file = APP_DIR.parent / "key.pem"
+
+    if cert_file.exists() and key_file.exists():
+        print(f"[App] *** Server starting on https://{HOST}:{PORT} ***")
+        print("[App] Using mkcert certificate")
+        app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True, use_reloader=False,
+                ssl_context=(str(cert_file), str(key_file)))
+    else:
+        print(f"[App] *** Server starting on https://{HOST}:{PORT} ***")
+        print("[App] Warning: Using self-signed cert (browser will warn)")
+        app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True, use_reloader=False, ssl_context='adhoc')

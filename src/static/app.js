@@ -7,12 +7,76 @@ const app = {
     isLoading: false,
     currentSubject: null,
     capturedFrame: null,
+    capturedFrameData: null,
     speechRecognition: null,
+    audioEnabled: true,
+    videoStream: null,
+
+    /**
+     * Play audio from base64 MP3 data
+     */
+    playAudio(base64Audio) {
+        if (!base64Audio || !this.audioEnabled) return;
+
+        try {
+            const audio = new Audio(`data:audio/mp3;base64,${base64Audio}`);
+            audio.play().catch(err => {
+                console.warn('Audio playback failed:', err);
+            });
+        } catch (err) {
+            console.warn('Audio error:', err);
+        }
+    },
+
+    /**
+     * Initialize the browser camera
+     */
+    async initCamera() {
+        try {
+            // Request camera access - prefer back camera on mobile
+            const constraints = {
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            };
+
+            this.videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+            const video = document.getElementById('camera-feed');
+            video.srcObject = this.videoStream;
+            console.log('Camera initialized');
+        } catch (err) {
+            console.error('Camera access failed:', err);
+            alert('Could not access camera. Please allow camera permissions and reload.');
+        }
+    },
+
+    /**
+     * Capture current frame as base64 JPEG
+     */
+    captureFrame() {
+        const video = document.getElementById('camera-feed');
+        const canvas = document.getElementById('capture-canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+
+        // Return base64 without the data URL prefix
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        return dataUrl.split(',')[1];
+    },
 
     /**
      * Initialize the application
      */
     init() {
+        // Initialize browser camera
+        this.initCamera();
+
         // Load settings
         this.loadSettings();
 
@@ -127,13 +191,19 @@ const app = {
         this.showOverlay('Let me see what\'s here...');
 
         try {
-            const response = await fetch('/describe', { method: 'POST' });
+            const frame = this.captureFrame();
+            const response = await fetch('/describe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame })
+            });
             const data = await response.json();
 
             if (data.error) {
                 this.showResponse('look-response', data.error, true);
             } else {
                 this.showResponse('look-response', data.description);
+                this.playAudio(data.audio);
             }
         } catch (error) {
             this.showResponse('look-response', 'Oops! Something went wrong. Try again?', true);
@@ -164,18 +234,16 @@ const app = {
         this.setLoading(true);
 
         try {
-            const response = await fetch('/snapshot', { method: 'POST' });
-            if (response.ok) {
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                this.capturedFrame = imageUrl;
-                this.freezeFrame(imageUrl);
+            // Capture from browser camera
+            this.capturedFrameData = this.captureFrame();
+            const imageUrl = `data:image/jpeg;base64,${this.capturedFrameData}`;
+            this.capturedFrame = imageUrl;
+            this.freezeFrame(imageUrl);
 
-                // Show enrollment UI
-                document.getElementById('meet-capture').classList.add('hidden');
-                document.getElementById('meet-enroll').classList.remove('hidden');
-                document.getElementById('name-input').focus();
-            }
+            // Show enrollment UI
+            document.getElementById('meet-capture').classList.add('hidden');
+            document.getElementById('meet-enroll').classList.remove('hidden');
+            document.getElementById('name-input').focus();
         } catch (error) {
             console.error('Capture failed:', error);
         }
@@ -210,11 +278,12 @@ const app = {
             const response = await fetch('/enroll', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
+                body: JSON.stringify({ name, frame: this.capturedFrameData })
             });
             const data = await response.json();
 
             if (data.success) {
+                this.playAudio(data.audio);
                 this.resetEnrollUI();
                 this.showCameraFeed();
                 this.loadLibrary();
@@ -236,10 +305,8 @@ const app = {
         document.getElementById('meet-capture').classList.remove('hidden');
         document.getElementById('meet-enroll').classList.add('hidden');
         document.getElementById('name-input').value = '';
-        if (this.capturedFrame) {
-            URL.revokeObjectURL(this.capturedFrame);
-            this.capturedFrame = null;
-        }
+        this.capturedFrame = null;
+        this.capturedFrameData = null;
     },
 
     /**
@@ -333,6 +400,7 @@ const app = {
             const data = await response.json();
 
             if (data.success) {
+                this.playAudio(data.audio);
                 this.closeSubjectModal();
                 this.loadLibrary();
             } else {
@@ -386,7 +454,12 @@ const app = {
         this.showOverlay('Let me see who\'s there...');
 
         try {
-            const response = await fetch('/identify', { method: 'POST' });
+            const frame = this.captureFrame();
+            const response = await fetch('/identify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame })
+            });
             const data = await response.json();
 
             if (data.redirect_to_meet) {
@@ -396,6 +469,7 @@ const app = {
                 this.showResponse('who-response', data.error, true);
             } else {
                 this.showResponse('who-response', data.response);
+                this.playAudio(data.audio);
                 document.getElementById('chat-section').classList.remove('hidden');
             }
         } catch (error) {
@@ -432,6 +506,7 @@ const app = {
                 // Append to response
                 const box = document.getElementById('who-response');
                 box.textContent += '\n\nYou: ' + message + '\n\n' + data.response;
+                this.playAudio(data.audio);
             }
 
             input.value = '';

@@ -5,3 +5,4 @@ requests>=2.31.0
 pygame>=2.5.0
 python-dotenv>=1.0.0
 openai>=1.0.0
+pyopenssl>=23.0.0

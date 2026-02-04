@@ -104,27 +104,50 @@ class TTSEngine:
             except queue.Empty:
                 continue
 
-    def _synthesize_and_play(self, text: str):
-        """Synthesize speech and play it."""
-        if not self._openai_client:
-            print(f"[TTS] Would speak: {text[:50]}...")
-            return
+    def synthesize(self, text: str) -> Optional[bytes]:
+        """
+        Synthesize speech and return MP3 bytes.
 
-        if not self._mixer_initialized:
-            print(f"[TTS] Mixer not initialized, cannot play: {text[:50]}...")
-            return
+        Args:
+            text: Text to synthesize
+
+        Returns:
+            MP3 audio bytes or None if synthesis failed
+        """
+        if not self._openai_client:
+            print(f"[TTS] No OpenAI client, cannot synthesize: {text[:50]}...")
+            return None
 
         try:
-            # Generate unique temp file
-            temp_file = self._temp_dir / f"tts_{int(time.time() * 1000)}.mp3"
-
             print(f"[TTS] Synthesizing: {text[:50]}...")
-            with self._openai_client.audio.speech.with_streaming_response.create(
+            response = self._openai_client.audio.speech.create(
                 model=TTS_MODEL,
                 voice=TTS_VOICE,
                 input=text
-            ) as response:
-                response.stream_to_file(str(temp_file))
+            )
+            print("[TTS] Synthesis complete")
+            return response.content
+
+        except Exception as e:
+            print(f"[TTS] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _synthesize_and_play(self, text: str):
+        """Synthesize speech and play it locally (legacy, for Pi speaker)."""
+        audio_data = self.synthesize(text)
+        if not audio_data:
+            return
+
+        if not self._mixer_initialized:
+            print(f"[TTS] Mixer not initialized, cannot play locally")
+            return
+
+        try:
+            # Write to temp file for pygame
+            temp_file = self._temp_dir / f"tts_{int(time.time() * 1000)}.mp3"
+            temp_file.write_bytes(audio_data)
 
             # Play the audio
             pygame.mixer.music.set_volume(self._volume)

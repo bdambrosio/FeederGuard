@@ -45,7 +45,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 # VLM Prompts
 DESCRIBE_PROMPT = """Describe what you see in this camera image. Include who or what is
 present, what they're doing, and anything interesting about the scene.
-Be friendly and fun - you're talking to kids!"""
+Be friendly and conversational, but not condescending - you're talking to very intelligent young adults."""
 
 IDENTIFY_PROMPT = """The first image is a reference sheet of people and pets I know,
 with their names labeled below each photo.

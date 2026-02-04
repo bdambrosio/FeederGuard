@@ -1,9 +1,21 @@
 """Vision Language Model client for Who's That?"""
 
+import os
 import requests
 from typing import Optional, List, Dict, Any
 
 from config import VLM_URL, VLM_MODEL, VLM_TIMEOUT, DESCRIBE_PROMPT, IDENTIFY_PROMPT
+
+
+def _get_headers() -> Dict[str, str]:
+    """Get request headers, including auth for OpenAI."""
+    headers = {"Content-Type": "application/json"}
+    # Add OpenAI auth if using their API
+    if "openai.com" in VLM_URL:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 class VLMError(Exception):
@@ -62,6 +74,7 @@ def ask_model(
     try:
         resp = requests.post(
             VLM_URL,
+            headers=_get_headers(),
             json={
                 "model": VLM_MODEL,
                 "max_tokens": max_tokens,
@@ -147,6 +160,7 @@ def chat_followup(
     try:
         resp = requests.post(
             VLM_URL,
+            headers=_get_headers(),
             json={
                 "model": VLM_MODEL,
                 "max_tokens": 300,
