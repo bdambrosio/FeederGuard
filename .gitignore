@@ -208,3 +208,8 @@ __marimo__/
 
 # Generated TTS audio
 response.mp3
+src/audio_temp/
+
+# Who's That? photos (stored outside repo in ~/photos by default)
+photos/
+.contact_sheet.jpg
