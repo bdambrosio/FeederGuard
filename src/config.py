@@ -57,7 +57,7 @@ Look at the live photo and tell me:
    If so, say who and describe what they're doing.
 2. Describe anyone or anything else interesting in the scene.
 
-Be friendly and conversational - you're talking to kids!
+Be friendly and conversational, but not condescending - you're talking to very intelligent young adults.
 If you're not sure about an identification, say so rather than guessing."""
 
 
